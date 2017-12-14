@@ -7,10 +7,11 @@
  */
 
 //#include <linux/stddef.h>       /* null, size, uint */
+#include <unistd.h>
 #include <stdint.h>
 #include <sys/types.h>
 #include <stdlib.h>
-#include <stdio.h> // dbg
+#include <stdio.h>
 #include "spi.h"
 //#include "tools.h"
 
@@ -445,8 +446,6 @@ int llenv32_spi_restore_cfg (int port, void *cfg)
 
 void *bootctl_map;
 
-#include <stdio.h>
-#include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <getopt.h>
@@ -592,12 +591,12 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 		default:
-			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v]\n", argv[0]);
+			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-s<num>]\n", argv[0]);
 		}
 	}
 
 	if ((argc - optind) != 1) {
-		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v]\n", argv[0]);
+		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-s<num>]\n", argv[0]);
 		return 1;
 	}
 	img_fd = open(argv[optind], O_RDONLY);

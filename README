@@ -11,5 +11,3 @@ Options:
 	-s <num> - perform reads in small requests. 'num' must be power of 2
 	   from 4 to 256. Default is 256.
 
-Directory board/baikal/mips/ contains the original U-Boot sources that we used
-for porting, just for reference.
