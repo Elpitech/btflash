@@ -454,8 +454,8 @@ void *bootctl_map;
 #include <sys/stat.h>
 
 #define SSECTOR_SIZE	0x1000	/* 4K */
-#define MAX_RETRY	5	/* retries per subsector */
-#define MAX_RETRY2	2	/* retries per read request */
+#define MAX_RETRY	10	/* retries per subsector */
+#define MAX_RETRY2	5	/* retries per read request */
 
 int read_size = 256;	/* must be power of 2 and < SPI_MAX_SIZE */
 
@@ -564,7 +564,7 @@ int main(int argc, char *argv[])
 	char *cfg_buf;
 	uint32_t addr;
 	int c;
-	int verify_only = 0;
+	int verify_only = 0, batch = 0;
 	int ok_sectors = 0, written_sectors = 0, bad_sectors = 0, retry_cnt = 0;
 
 	while ((c = getopt(argc, argv, "dvs:")) != -1) {
@@ -574,6 +574,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'v':
 			verify_only = 1;
+			break;
+		case 'b':
+			batch = 1;
 			break;
 		case 's':
 			read_size = strtoul(optarg, NULL, 0);
@@ -591,12 +594,12 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 		default:
-			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-s<num>]\n", argv[0]);
+			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-s<num>]\n", argv[0]);
 		}
 	}
 
 	if ((argc - optind) != 1) {
-		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-s<num>]\n", argv[0]);
+		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-s<num>]\n", argv[0]);
 		return 1;
 	}
 	img_fd = open(argv[optind], O_RDONLY);
@@ -661,11 +664,15 @@ int main(int argc, char *argv[])
 		printf("Erase/Write/Verify by 4K subsectors\n");
 
 	i = 0;
-	printf("Sector %5d", i);
-	fflush(stdout);
-	for (addr = 0; addr < img_size; addr += SSECTOR_SIZE) {
-		printf("\b\b\b\b\b%5d", i);
+	if (!batch) {
+		printf("Sector %5d", i);
 		fflush(stdout);
+	}
+	for (addr = 0; addr < img_size; addr += SSECTOR_SIZE) {
+		if (!batch) {
+			printf("\b\b\b\b\b%5d", i);
+			fflush(stdout);
+		}
 		rc = do_subsector(addr, img_buf + addr, verify_only);
 		if (rc == 0)
 			ok_sectors++;
@@ -694,6 +701,8 @@ int main(int argc, char *argv[])
 	*(uint32_t *)bootctl_map = reg;
 	munmap(bootctl_map, pg_size);
 
+	if (rc)
+		fprintf(stderr, "Errors encountered! Flash image is corrupt!\n");
 	return rc;
 }
 
