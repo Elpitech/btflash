@@ -3,11 +3,14 @@ The image must be exactly 16MB size.
 
 Usage:
 
-# btflash2 <img_file> [-d] [-v] [-s<num>]
+# btflash2 <img_file> [-b] [-d] [-v] [-r] [-s<num>] [-f<num>]
 
 Options:
+	-b - batch mode (no progress is printed out)
 	-d - verbose output
 	-v - verify only (contents of flash is compared to the image)
+	-r - read image into file
+	-f <num> - start flashing from sector 'num'
 	-s <num> - perform reads in small requests. 'num' must be power of 2
 	   from 4 to 256. Default is 256.
 

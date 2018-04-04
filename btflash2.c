@@ -550,6 +550,25 @@ int do_subsector(uint32_t addr, uint8_t *source, int verify_only)
 		return -1;
 }
 
+int read_subsector(uint32_t addr, uint8_t *dst)
+{
+	int rc;
+	int cnt;
+	uint8_t buf[SSECTOR_SIZE];
+
+	for (cnt = 0; cnt < MAX_RETRY; cnt++) {
+		rc = spi_read(addr, buf, SSECTOR_SIZE);
+		if (rc == 0) {
+			memcpy(dst, buf, SSECTOR_SIZE);
+			break;
+		}
+	}
+	if (cnt < MAX_RETRY)
+		return cnt;
+	else
+		return -1;
+}
+
 int main(int argc, char *argv[])
 {
 	int mem_fd;
@@ -564,10 +583,11 @@ int main(int argc, char *argv[])
 	char *cfg_buf;
 	uint32_t addr;
 	int c;
-	int verify_only = 0, batch = 0;
+	int verify_only = 0, batch = 0, do_read = 0;
 	int ok_sectors = 0, written_sectors = 0, bad_sectors = 0, retry_cnt = 0;
+	int start_sector = 0;
 
-	while ((c = getopt(argc, argv, "dvs:")) != -1) {
+	while ((c = getopt(argc, argv, "bf:dvs:r")) != -1) {
 		switch(c) {
 		case 'd':
 			debug_level = 1;
@@ -593,40 +613,59 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "read_size must be power of 2 from 8 to 256\n");
 				return 1;
 			}
+		case 'r':
+			do_read = 1;
+			break;
+		case 'f':
+			start_sector = strtoul(optarg, NULL, 0);
+			if (start_sector < 0 || start_sector >= 4096) {
+				fprintf(stderr, "Bad sector number %d\n", start_sector);
+				return 1;
+			}
+			break;
 		default:
-			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-s<num>]\n", argv[0]);
+			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-r][-f<num>][-s<num>]\n", argv[0]);
 		}
 	}
 
 	if ((argc - optind) != 1) {
-		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-s<num>]\n", argv[0]);
+		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-r][-f<num>][-s<num>]\n", argv[0]);
 		return 1;
 	}
-	img_fd = open(argv[optind], O_RDONLY);
+	if (do_read)
+		img_fd = open(argv[optind], O_RDWR|O_CREAT|O_TRUNC);
+	else
+		img_fd = open(argv[optind], O_RDONLY);
 	if (img_fd < 0) {
 		perror("open image");
 		return 1;
 	}
-	if (fstat(img_fd, &st_buf)) {
-		perror("Can't stat image");
-		return 1;
-	}
-	img_size = st_buf.st_size;
-	if (img_size != 16*1024*1024) {
-		fprintf(stderr, "Wrong image size: %u (%x)\n", img_size, img_size);
-		return 1;
+	if (!do_read) {
+		if (fstat(img_fd, &st_buf)) {
+			perror("Can't stat image");
+			return 1;
+		}
+		img_size = st_buf.st_size;
+		if (img_size != 16*1024*1024) {
+			fprintf(stderr, "Wrong image size: %u (%x)\n", img_size, img_size);
+			return 1;
+		}
+	} else {
+		img_size = 16*1024*1024;
 	}
 	img_buf = malloc(img_size);
 	if (!img_buf) {
 		fprintf(stderr, "No memory?\n");
 		return 1;
 	}
-	i = read(img_fd, img_buf, img_size);
-	if (i != img_size) {
-		fprintf(stderr, "Can't read image? Got %d instead of %lu\n", i, img_size);
-		return 1;
+	if (!do_read) {
+		i = read(img_fd, img_buf, img_size);
+		if (i != img_size) {
+			fprintf(stderr, "Can't read image? Got %d instead of %lu\n", i, img_size);
+			return 1;
+		}
+		close(img_fd);
 	}
-	close(img_fd);
 
 	mem_fd = open("/dev/mem", O_RDWR);
 	if (mem_fd < 0) {
@@ -660,6 +699,8 @@ int main(int argc, char *argv[])
 
 	if (verify_only)
 		printf("Verify by 4K subsectors\n");
+	else if (do_read)
+		printf("Read by 4K subsectors\n");
 	else
 		printf("Erase/Write/Verify by 4K subsectors\n");
 
@@ -668,12 +709,15 @@ int main(int argc, char *argv[])
 		printf("Sector %5d", i);
 		fflush(stdout);
 	}
-	for (addr = 0; addr < img_size; addr += SSECTOR_SIZE) {
+	for (addr = start_sector * SSECTOR_SIZE; addr < img_size; addr += SSECTOR_SIZE) {
 		if (!batch) {
 			printf("\b\b\b\b\b%5d", i);
 			fflush(stdout);
 		}
-		rc = do_subsector(addr, img_buf + addr, verify_only);
+		if (do_read)
+			rc = read_subsector(addr, img_buf + addr);
+		else
+			rc = do_subsector(addr, img_buf + addr, verify_only);
 		if (rc == 0)
 			ok_sectors++;
 		else if (rc == 1)
@@ -688,7 +732,11 @@ int main(int argc, char *argv[])
 		i++;
 	}
 	printf("\nDone\n");
-	if (verify_only) {
+	if (do_read) {
+		rc = write(img_fd, img_buf, img_size);
+		if (rc == img_size)
+			printf("%d sectors written\n", ok_sectors + written_sectors);
+	} else if (verify_only) {
 		printf("%d sectors OK\n", ok_sectors + written_sectors);
 	} else {
 		printf("%d sectors written, %d - were ok, total_retries - %d\n",
