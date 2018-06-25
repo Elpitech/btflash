@@ -214,6 +214,7 @@ int llenv32_spi_exec (int port, int line, uint8_t cmd_op, uint32_t address,
 
 
         case SPI_FLASH_READ:    /* Read Data Bytes */
+        case 0x65:		/* Read Any Register */
             in      = cmd;
             in_len  = 4;
             out     = buffer;
@@ -223,8 +224,8 @@ int llenv32_spi_exec (int port, int line, uint8_t cmd_op, uint32_t address,
             break;
 
         case SPI_FLASH_RDSR:    /* Read Status Register */
-	case 0x35:
-	case 0x15:
+        case 0x35:
+        case 0x15:
             in      = cmd;
             in_len  = 1;
             out     = buffer;
@@ -254,6 +255,8 @@ int llenv32_spi_exec (int port, int line, uint8_t cmd_op, uint32_t address,
         case SPI_FLASH_WRDI:    /* Write Disable */
         case SPI_FLASH_WREN:    /* Write Enable */
         case SPI_FLASH_BE:      /* Bulk Erase */
+	case SPI_FLASH_RSTEN:	/* Reset Enable */
+	case SPI_FLASH_RST:	/* Reset */
             in      = cmd;
             in_len  = 1;
             out     = 0;
@@ -262,6 +265,7 @@ int llenv32_spi_exec (int port, int line, uint8_t cmd_op, uint32_t address,
 
 
         case SPI_FLASH_PP:      /* Page Program */
+        case 0x71:		/* Write Any Register */
             size = (buf_len > SPI_MAX_SIZE)? SPI_MAX_SIZE : buf_len;
             in      = cmd;
             in_len  = 4 + size;
@@ -298,26 +302,12 @@ int llenv32_spi_status (int port, int line, void *status)
 
 int llenv32_spi_wren (int port, int line)
 {
-
-#if 1
     uint8_t status;
+
     llenv32_spi_exec (port, line, SPI_FLASH_WREN, 0, 0, 0);
     llenv32_spi_exec (port, line, SPI_FLASH_RDSR, 0, &status, 1);
-    return (status & SPI_FLASH_SR_WEL)? 0 : -1;
-#else
-    int err;
-    uint8_t status;
-
-    err = llenv32_spi_exec (port, line, SPI_FLASH_WREN, 0, 0, 0);
-    if(err)
-        return err;
-
-    err = llenv32_spi_status(port, line, &status);
-    if(err)
-        return err;
 
     return (status & SPI_FLASH_SR_WEL)? 0 : -1;
-#endif
 }
 
 
@@ -325,13 +315,18 @@ int llenv32_spi_wren (int port, int line)
 int llenv32_spi_wait (int port, int line)
 {
 #if 1
-    int err;
+    int err, cnt = 0;
     uint8_t status;
     do {
         err = llenv32_spi_exec (port, line, SPI_FLASH_RDSR, 0, &status, 1);
         if(err)
             return err;
+        cnt++;
     } while (status & SPI_FLASH_SR_WIP);
+    if ((cnt == 1) && (status & 0x7c)) {
+        dprintf("Wait status = %02x\n", status);
+        return -1; /* Work In Progress never seen (invalid command?) */
+    }
     return 0;
 #else
     int err;
@@ -453,11 +448,15 @@ void *bootctl_map;
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#define SSECTOR_SIZE	0x1000	/* 4K */
+#define SSECTOR_SIZE	0x1000	/* Small Sector - 4K */
+#define SECTOR_SIZE	0x10000	/* Sector 64K */
 #define MAX_RETRY	10	/* retries per subsector */
 #define MAX_RETRY2	5	/* retries per read request */
 
 int read_size = 256;	/* must be power of 2 and < SPI_MAX_SIZE */
+int sector_size = SSECTOR_SIZE;	/* or SECTOR_SIZE */
+uint8_t *vr_buf;		/* allocated of sector_size */
+uint8_t erase_cmd = SPI_FLASH_SSE;	/* or SPI_FLASH_SE for 64K sectors */
 
 int spi_read(uint32_t addr, uint8_t *buf, int size)
 {
@@ -488,7 +487,7 @@ int spi_erase_subsect(uint32_t addr)
 	for (i = 0; i < MAX_RETRY2; i++) {
 		rc = llenv32_spi_wren(0, 0);
 		if (!rc) {
-			rc = llenv32_spi_exec(0, 0, SPI_FLASH_SSE, addr, 0, 0);
+			rc = llenv32_spi_exec(0, 0, erase_cmd, addr, 0, 0);
 			if (!rc)
 				rc = llenv32_spi_wait(0, 0);
 		}
@@ -503,7 +502,7 @@ int spi_write_subsector(uint32_t addr, uint8_t *buf)
 	int rc, i;
 	uint32_t off;
 
-	for (off = 0; off < SSECTOR_SIZE; off += SPI_MAX_SIZE) {
+	for (off = 0; off < sector_size; off += SPI_MAX_SIZE) {
 		for (i = 0; i < MAX_RETRY2; i++) {
 			rc = llenv32_spi_write(0, 0, addr + off, buf + off, SPI_MAX_SIZE);
 			if (!rc)
@@ -526,15 +525,16 @@ int do_subsector(uint32_t addr, uint8_t *source, int verify_only)
 {
 	int OK = 0, rc;
 	int cnt;
-	uint8_t buf[SSECTOR_SIZE];
 
 	for (cnt = 0; cnt < MAX_RETRY; cnt++) {
-		rc = spi_read(addr, buf, SSECTOR_SIZE);
+		rc = spi_read(addr, vr_buf, sector_size);
 		if (rc)
 			continue;
-		OK = !memcmp(buf, source, SSECTOR_SIZE);
-		if (!OK && (verify_only || cnt))
-			dprintf(" data mismatch in sector %x\n", addr >> 12);
+		OK = !memcmp(vr_buf, source, sector_size);
+		if (!OK && (verify_only || cnt)) {
+			dprintf(" data mismatch in sector %x\n", addr / sector_size);
+			dprintf("%02x %02x %02x %02x\n", vr_buf[0], vr_buf[1], vr_buf[2], vr_buf[3]);
+		}
 		if (OK || verify_only)
 			break;
 		// erase
@@ -554,12 +554,11 @@ int read_subsector(uint32_t addr, uint8_t *dst)
 {
 	int rc;
 	int cnt;
-	uint8_t buf[SSECTOR_SIZE];
 
 	for (cnt = 0; cnt < MAX_RETRY; cnt++) {
-		rc = spi_read(addr, buf, SSECTOR_SIZE);
+		rc = spi_read(addr, vr_buf, sector_size);
 		if (rc == 0) {
-			memcpy(dst, buf, SSECTOR_SIZE);
+			memcpy(dst, vr_buf, sector_size);
 			break;
 		}
 	}
@@ -567,6 +566,43 @@ int read_subsector(uint32_t addr, uint8_t *dst)
 		return cnt;
 	else
 		return -1;
+}
+
+int set_uniform_sect()
+{
+	uint8_t buf[16], cr3v;
+	int rc;
+
+	rc = llenv32_spi_exec(0, 0, 0x65, 0x000004, buf, 2);
+	if (rc)
+		return rc;
+	cr3v = buf[1];	/* buf[0] is dummy */
+	dprintf("CR3V = %02x\n", cr3v);
+	cr3v = cr3v & ~0x2;
+	cr3v |= 8;
+	buf[0] = cr3v;
+	rc = llenv32_spi_wren(0, 0);
+	if (rc)
+		return rc;
+	rc = llenv32_spi_exec(0, 0, 0x71, 0x000004, buf, 1);
+	if (rc)
+		return rc;
+	usleep(100);
+	rc = llenv32_spi_exec(0, 0, SPI_FLASH_RSTEN, 0, NULL, 0);
+	if (rc)
+		return rc;
+	rc = llenv32_spi_exec(0, 0, SPI_FLASH_RST, 0, NULL, 0);
+	if (rc)
+		return rc;
+	usleep(100);
+	rc = llenv32_spi_exec(0, 0, 0x65, 0x800004, buf, 2);
+	if (rc)
+		return rc;
+	if ((buf[1] & 0xe) != 8) {
+		fprintf(stderr, "Can't set uniform sectors (CR3V = %02d)\n", buf[1]);
+		rc = -2;
+	}
+	return rc;
 }
 
 int main(int argc, char *argv[])
@@ -633,7 +669,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	if (do_read)
-		img_fd = open(argv[optind], O_RDWR|O_CREAT|O_TRUNC);
+		img_fd = open(argv[optind], O_RDWR|O_CREAT|O_TRUNC, 0644);
 	else
 		img_fd = open(argv[optind], O_RDONLY);
 	if (img_fd < 0) {
@@ -690,26 +726,40 @@ int main(int argc, char *argv[])
 	rc = llenv32_spi_exec(0, 0, SPI_FLASH_RDID, 0, buf, sizeof(buf));
 	if (rc) {
 		fprintf(stderr, "spi_exec() failed with %d\n", rc);
+		llenv32_spi_restore_cfg(0, cfg_buf);
+		return rc;
 	} else {
 		dprintf("ID data:");
 		for (i = 0; i < 20; i++)
 			dprintf(" %02x", buf[i]);
 		printf("\n");
+		if (buf[0] == 1 && buf[1] == 0x20 && buf[2] == 0x18) {
+			/* Cypress flash */
+			sector_size = SECTOR_SIZE;
+			erase_cmd = SPI_FLASH_SE;
+			rc = set_uniform_sect();
+			if (rc) {
+				fprintf(stderr, "Flash setup failed.\n");
+				return rc;
+			}
+		}
 	}
 
+	vr_buf = malloc(sector_size);
+
 	if (verify_only)
-		printf("Verify by 4K subsectors\n");
+		printf("Verify by %dK subsectors\n", sector_size >> 10);
 	else if (do_read)
-		printf("Read by 4K subsectors\n");
+		printf("Read by %dK subsectors\n", sector_size >> 10);
 	else
-		printf("Erase/Write/Verify by 4K subsectors\n");
+		printf("Erase/Write/Verify by %dK subsectors\n", sector_size >> 10);
 
 	i = 0;
 	if (!batch) {
 		printf("Sector %5d", i);
 		fflush(stdout);
 	}
-	for (addr = start_sector * SSECTOR_SIZE; addr < img_size; addr += SSECTOR_SIZE) {
+	for (addr = start_sector * sector_size; addr < img_size; addr += sector_size) {
 		if (!batch) {
 			printf("\b\b\b\b\b%5d", i);
 			fflush(stdout);
