@@ -605,6 +605,21 @@ int set_uniform_sect()
 	return rc;
 }
 
+int spi_reset()
+{
+	int i, rc;
+
+	rc = llenv32_spi_exec(0, 0, SPI_FLASH_RSTEN, 0, NULL, 0);
+	if (rc)
+		return rc;
+	for (i = 50; i > 0; i--)
+		;
+	rc = llenv32_spi_exec(0, 0, SPI_FLASH_RST, 0, NULL, 0);
+
+	return rc;
+}
+
+
 int main(int argc, char *argv[])
 {
 	int mem_fd;
@@ -723,6 +738,7 @@ int main(int argc, char *argv[])
 
 	cfg_buf = llenv32_spi_store_cfg(0);
 	llenv32_spi_init(0);
+	spi_reset();
 	rc = llenv32_spi_exec(0, 0, SPI_FLASH_RDID, 0, buf, sizeof(buf));
 	if (rc) {
 		fprintf(stderr, "spi_exec() failed with %d\n", rc);
