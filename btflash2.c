@@ -619,6 +619,19 @@ int spi_reset()
 	return rc;
 }
 
+int usage(char *progname)
+{
+	fprintf(stderr, "Usage: %s <image_pathname> [-h][-d][-v][-b][-r][-f<num>][-s<num>]\n", progname);
+	fprintf(stderr, "\t-h - this help\n"
+			"\t-d - debug output\n"
+			"\t-v - verify only\n"
+			"\t-b - \"batch\" mode (no output)\n"
+			"\t-r - read image into specified file\n"
+			"\t-f<sec> - start from <sec> 4K-sector (0-4095)\n"
+			"\t-s<len> - read/verify size <len> bytes per request\n");
+
+	return 1;
+}
 
 int main(int argc, char *argv[])
 {
@@ -630,8 +643,8 @@ int main(int argc, char *argv[])
 	struct stat st_buf;
 	size_t img_size;
 	int img_fd;
-	char *img_buf;
-	char *cfg_buf;
+	uint8_t *img_buf;
+	uint8_t *cfg_buf;
 	uint32_t addr;
 	int c;
 	int verify_only = 0, batch = 0, do_read = 0;
@@ -675,13 +688,12 @@ int main(int argc, char *argv[])
 			}
 			break;
 		default:
-			fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-r][-f<num>][-s<num>]\n", argv[0]);
+			return usage(argv[0]);
 		}
 	}
 
 	if ((argc - optind) != 1) {
-		fprintf(stderr, "Usage: %s <image_pathname> [-d][-v][-b][-r][-f<num>][-s<num>]\n", argv[0]);
-		return 1;
+		return usage(argv[0]);
 	}
 	if (do_read)
 		img_fd = open(argv[optind], O_RDWR|O_CREAT|O_TRUNC, 0644);
@@ -698,7 +710,7 @@ int main(int argc, char *argv[])
 		}
 		img_size = st_buf.st_size;
 		if (img_size != 16*1024*1024) {
-			fprintf(stderr, "Wrong image size: %u (%x)\n", img_size, img_size);
+			fprintf(stderr, "Wrong image size: %lu (%lx)\n", img_size, img_size);
 			return 1;
 		}
 	} else {

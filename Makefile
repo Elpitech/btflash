@@ -2,7 +2,7 @@ bindir ?= /usr/bin
 
 CC ?= $(CROSS_COMPILE)gcc
 
-CFLAGS+=-D_GNU_SOURCE -std=c99
+CFLAGS+=-D_GNU_SOURCE -std=c99 -Wall
 
 PROG = btflash2
 OBJS = btflash2.o
