@@ -1,6 +1,6 @@
 bindir ?= /usr/bin
 
-CC ?= $(CROSS_COMPILE)gcc
+CC := $(CROSS_COMPILE)gcc
 
 CFLAGS+=-D_GNU_SOURCE -std=c99 -Wall
 
