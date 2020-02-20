@@ -1,0 +1,19 @@
+# The Dockerfile for the image is in common/integration/buster-builder.  The
+# image is present on coldroom.tpl, but it is registered with hub.docker.com,
+# and you can pull it from there.
+image: "xxor/buster-builder:1.0"
+
+variables:
+  GIT_SSL_NO_VERIFY: "1"                     # Allow self-signed certificates (REQUIRED for gitlab.tpl)
+  CC:                "mipsel-linux-gnu-gcc"
+  CROSS_COMPILE:     "mipsel-linux-gnu-"
+
+build:
+  script:
+    # clean previous job failed artifacts
+    - make clean
+    - make CROSS_COMPILE=$CROSS_COMPILE all
+  artifacts:
+    paths:
+    - ./btflash2
+    expire_in: 1 month
