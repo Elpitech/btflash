@@ -17,3 +17,9 @@ build:
     paths:
     - ./btflash2
     expire_in: 1 month
+
+# static code analysis with cppcheck (we can add --enable=all later)
+cppcheck:
+  script:
+    - cppcheck --force --quiet --inline-suppr .
+
